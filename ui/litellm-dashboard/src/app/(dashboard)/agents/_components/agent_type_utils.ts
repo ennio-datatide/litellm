@@ -26,6 +26,22 @@ export const detectAgentType = (agent: Agent): string => {
 };
 
 /**
+ * Recovers a placeholder's value from a model string built with `model_template`.
+ * The value may itself contain "/", e.g. an AgentCore ARN in
+ * "bedrock/agentcore/{agent_runtime_arn}", so match on the literal text around
+ * the placeholder instead of splitting on "/".
+ */
+export const extractModelTemplateValue = (modelTemplate: string, model: string, key: string): string | undefined => {
+  const placeholder = `{${key}}`;
+  const placeholderIndex = modelTemplate.indexOf(placeholder);
+  if (placeholderIndex === -1) return undefined;
+  const prefix = modelTemplate.slice(0, placeholderIndex);
+  const suffix = modelTemplate.slice(placeholderIndex + placeholder.length);
+  if (!model.startsWith(prefix) || !model.endsWith(suffix)) return undefined;
+  return model.slice(prefix.length, model.length - suffix.length) || undefined;
+};
+
+/**
  * Parses agent data for dynamic form fields (non-A2A agents).
  * Extracts values from litellm_params based on the agent type metadata.
  */
@@ -39,20 +55,9 @@ export const parseDynamicAgentForForm = (agent: Agent, agentTypeInfo: AgentCreat
   for (const field of agentTypeInfo.credential_fields) {
     if (field.include_in_litellm_params !== false) {
       values[field.key] = agent.litellm_params?.[field.key] || field.default_value || "";
-    } else {
-      // For fields not in litellm_params (like agent_id), try to extract from model string
-      if (agentTypeInfo.model_template && agent.litellm_params?.model) {
-        const model = agent.litellm_params.model;
-        const templateParts = agentTypeInfo.model_template.split("/");
-        const modelParts = model.split("/");
-
-        // Find the placeholder position and extract the value
-        templateParts.forEach((part, index) => {
-          if (part === `{${field.key}}` && modelParts[index]) {
-            values[field.key] = modelParts[index];
-          }
-        });
-      }
+    } else if (agentTypeInfo.model_template && agent.litellm_params?.model) {
+      const value = extractModelTemplateValue(agentTypeInfo.model_template, agent.litellm_params.model, field.key);
+      if (value !== undefined) values[field.key] = value;
     }
   }
 
