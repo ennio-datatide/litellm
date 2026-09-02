@@ -23,6 +23,7 @@ from litellm._uuid import uuid
 from litellm.constants import (
     DD_TRACER_STREAMING_CHUNK_YIELD_RESOURCE,
     DEFAULT_MAX_RECURSE_DEPTH,
+    GENERIC_INTERNAL_SERVER_ERROR_MESSAGE,
     LITELLM_DETAILED_TIMING,
     LITELLM_HTTP_STATUS_CLIENT_DISCONNECTED,
     MAX_PAYLOAD_SIZE_FOR_DEBUG_LOG,
@@ -3416,7 +3417,7 @@ class ProxyBaseLLMRequestProcessing:
             _code = _exc_status_code
         else:
             _code = status.HTTP_500_INTERNAL_SERVER_ERROR
-        raise ProxyException(
+        proxy_exc: Final = ProxyException(
             message=getattr(e, "message", error_msg),
             type=getattr(e, "type", "None"),
             param=getattr(e, "param", "None"),
@@ -3425,6 +3426,11 @@ class ProxyBaseLLMRequestProcessing:
             provider_specific_fields=getattr(e, "provider_specific_fields", None),
             headers=safe_headers,
         )
+        # proxy_exc.code, not _exc_status_code, is the check: ProxyException itself
+        # reclassifies some codeless exceptions (e.g. RouterRateLimitError) to 429/401.
+        if _exc_status_code is None and proxy_exc.code == "500":
+            proxy_exc.message = GENERIC_INTERNAL_SERVER_ERROR_MESSAGE
+        raise proxy_exc
 
     #########################################################
     # Proxy Level Streaming Data Generator
